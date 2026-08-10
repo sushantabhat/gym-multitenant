@@ -641,10 +641,10 @@ export default function TenantDashboard() {
                       <button
                         onClick={() => handleCheckIn(member.id)}
                         className="px-4 py-2 text-xs font-bold rounded-md shadow-sm text-white transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                        style={{ backgroundColor: brandColor }}
-                        disabled={member.subscriptionStatus !== 'ACTIVE'}
+                        style={member.subscriptions?.[0]?.status === 'ACTIVE' ? { backgroundColor: brandColor } : {}}
+                        disabled={member.subscriptions?.[0]?.status !== 'ACTIVE'}
                       >
-                        {member.subscriptionStatus === 'ACTIVE' ? "Check-In" : "EXPIRED"}
+                        {member.subscriptions?.[0]?.status === 'ACTIVE' ? "Check-In" : "EXPIRED"}
                       </button>
                     </div>
                   ))}
