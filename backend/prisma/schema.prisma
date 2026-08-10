@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ------------------------------------------------------
+// ENUMS FOR ROLE-BASED ACCESS CONTROL
+// ------------------------------------------------------
+enum TenantStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UserRole {
+  PLATFORM_ADMIN
+  GYM_ADMIN
+  MEMBER
+}
+
+// ------------------------------------------------------
+// 1. TENANT (THE GYM ORGANIZATION)
+// ------------------------------------------------------
+model Tenant {
+  id        String       @id @default(uuid())
+  name      String
+  status    TenantStatus @default(PENDING) // Gyms must be verified!
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  users     User[]
+  featureFlags FeatureFlag[]
+}
+
+// ------------------------------------------------------
+// 2. USER (MEMBERS, GYM ADMINS, AND PLATFORM ADMINS)
+// ------------------------------------------------------
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  password     String?   // Optional because regular members don't need passwords yet
+  phone_number String?
+  role         UserRole @default(MEMBER)
+  
+  // Link to the Tenant
+  tenantId     String? // Optional because PLATFORM_ADMIN doesn't belong to a specific gym!
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id])
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ------------------------------------------------------
+// 3. FEATURE FLAGS
+// Allows toggling features on and off dynamically
+// ------------------------------------------------------
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  key         String
+  isEnabled   Boolean  @default(false)
+  description String?
+  
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, tenantId]) // A gym can only have one flag per key
+}
