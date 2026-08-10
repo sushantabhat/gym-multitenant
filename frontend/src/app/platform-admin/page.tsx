@@ -197,8 +197,15 @@ export default function PlatformAdmin() {
                   )}
 
                   {(activeMenu === "verification" ? pendingGyms : approvedGyms).map((gym) => {
-                    const exportFlag = gym.featureFlags?.find((f: any) => f.key === 'export-data');
-                    const isExportEnabled = exportFlag ? exportFlag.isEnabled : false;
+                    const getFlag = (key: string) => gym.featureFlags?.find((f: any) => f.key === key)?.isEnabled || false;
+                    
+                    const flags = [
+                      { key: 'export-data', label: 'Export CSV' },
+                      { key: 'advanced-analytics', label: 'Analytics Tab' },
+                      { key: 'member-management', label: 'Members Tab' },
+                      { key: 'attendance-tracking', label: 'Attendance Tab' },
+                      { key: 'white-labeling', label: 'Settings Tab' }
+                    ];
 
                     return (
                       <tr key={gym.id} className="hover:bg-slate-50/50 transition-colors group">
@@ -217,22 +224,25 @@ export default function PlatformAdmin() {
                               Verify & Approve
                             </button>
                           ) : (
-                            <div className="flex items-center gap-3">
-                              <span className="text-xs font-medium text-slate-500">Export CSV:</span>
-                              <button
-                                onClick={() => handleToggleFlag(gym.id, 'export-data', isExportEnabled)}
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 transition-colors duration-200 ease-in-out ${
-                                  isExportEnabled ? "bg-emerald-500" : "bg-slate-200"
-                                }`}
-                                role="switch"
-                                aria-checked={isExportEnabled}
-                              >
-                                <span
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                                    isExportEnabled ? "translate-x-2" : "-translate-x-2"
-                                  }`}
-                                />
-                              </button>
+                            <div className="flex items-center gap-5">
+                              {flags.map(flag => (
+                                <div key={flag.key} className="flex items-center gap-2">
+                                  <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">{flag.label}:</span>
+                                  <button
+                                    onClick={() => handleToggleFlag(gym.id, flag.key, getFlag(flag.key))}
+                                    className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-transparent focus:outline-none transition-colors duration-200 ease-in-out ${
+                                      getFlag(flag.key) ? "bg-emerald-500" : "bg-slate-200"
+                                    }`}
+                                    role="switch"
+                                  >
+                                    <span
+                                      className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                        getFlag(flag.key) ? "translate-x-1.5" : "-translate-x-1.5"
+                                      }`}
+                                    />
+                                  </button>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </td>

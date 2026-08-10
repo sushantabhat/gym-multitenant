@@ -239,8 +239,37 @@ app.post('/api/tenant/:id/members', async (req, res) => {
       }
     });
     res.status(201).json(newUser);
-  } catch (error) {
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'A user with that email already exists!' });
+    }
     res.status(500).json({ error: 'Failed to create member' });
+  }
+});
+
+// ------------------------------------------------------
+// 7.5 GYM ADMIN: EDIT & DELETE MEMBER
+// ------------------------------------------------------
+app.delete('/api/users/:userId', async (req, res) => {
+  try {
+    await prisma.user.delete({ where: { id: req.params.userId } });
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete member' });
+  }
+});
+
+app.put('/api/users/:userId/details', async (req, res) => {
+  try {
+    const { name, email, phone_number, membershipTier } = req.body;
+    const updatedUser = await prisma.user.update({
+      where: { id: req.params.userId },
+      data: { name, email, phone_number, membershipTier }
+    });
+    res.json(updatedUser);
+  } catch (error: any) {
+    if (error.code === 'P2002') return res.status(400).json({ error: 'Email already exists' });
+    res.status(500).json({ error: 'Failed to update member' });
   }
 });
 
