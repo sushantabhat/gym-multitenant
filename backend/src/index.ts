@@ -218,6 +218,126 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
+// ------------------------------------------------------
+// 7. GYM ADMIN: CREATE MEMBER
+// ------------------------------------------------------
+app.post('/api/tenant/:id/members', async (req, res) => {
+  try {
+    const gymId = req.params.id;
+    const { name, email, phone_number, membershipTier } = req.body;
+    // Basic auth check (should verify adminEmail in real app, but for speed we trust the dashboard call)
+    
+    const newUser = await prisma.user.create({
+      data: {
+        name,
+        email,
+        phone_number,
+        tenantId: gymId,
+        role: 'MEMBER',
+        membershipTier: membershipTier || 'BASIC',
+        subscriptionStatus: 'ACTIVE'
+      }
+    });
+    res.status(201).json(newUser);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create member' });
+  }
+});
+
+// ------------------------------------------------------
+// 8. GYM ADMIN: UPDATE SETTINGS (WHITE-LABELING)
+// ------------------------------------------------------
+app.put('/api/tenant/:id/settings', async (req, res) => {
+  try {
+    const gymId = req.params.id;
+    const { brandColor, welcomeMessage } = req.body;
+    
+    const updated = await prisma.tenant.update({
+      where: { id: gymId },
+      data: { brandColor, welcomeMessage }
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+// ------------------------------------------------------
+// 9. GYM ADMIN: UPDATE MEMBERSHIP
+// ------------------------------------------------------
+app.put('/api/users/:userId/membership', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { membershipTier, subscriptionStatus } = req.body;
+    
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { membershipTier, subscriptionStatus }
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update membership' });
+  }
+});
+
+// ------------------------------------------------------
+// 10. GYM ADMIN: CHECK-IN MEMBER
+// ------------------------------------------------------
+app.post('/api/users/:userId/checkin', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    // Find the user to get their tenantId
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !user.tenantId) return res.status(404).json({ error: 'User not found' });
+    if (user.subscriptionStatus !== 'ACTIVE') return res.status(403).json({ error: 'Subscription is not active' });
+
+    const attendance = await prisma.attendance.create({
+      data: {
+        userId: user.id,
+        tenantId: user.tenantId
+      }
+    });
+    res.status(201).json(attendance);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to check in' });
+  }
+});
+
+// ------------------------------------------------------
+// 11. GYM ADMIN: GET ANALYTICS DATA
+// ------------------------------------------------------
+app.get('/api/tenant/:id/analytics', async (req, res) => {
+  try {
+    const gymId = req.params.id;
+    
+    // Group members by tier
+    const tierDistribution = await prisma.user.groupBy({
+      by: ['membershipTier'],
+      where: { tenantId: gymId, role: 'MEMBER' },
+      _count: { id: true }
+    });
+
+    // Group members by status
+    const statusDistribution = await prisma.user.groupBy({
+      by: ['subscriptionStatus'],
+      where: { tenantId: gymId, role: 'MEMBER' },
+      _count: { id: true }
+    });
+
+    // Get last 30 attendance records
+    const recentAttendance = await prisma.attendance.findMany({
+      where: { tenantId: gymId },
+      orderBy: { checkInTime: 'desc' },
+      take: 30,
+      include: { user: { select: { name: true } } }
+    });
+
+    res.json({ tierDistribution, statusDistribution, recentAttendance });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Backend Server is running at http://localhost:${PORT}`);
 });

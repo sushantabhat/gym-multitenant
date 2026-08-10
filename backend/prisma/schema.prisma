@@ -28,10 +28,17 @@ model Tenant {
   id        String       @id @default(uuid())
   name      String
   status    TenantStatus @default(PENDING) // Gyms must be verified!
+  
+  // Custom Branding (White-labeling)
+  brandColor String?     @default("#0f172a") // slate-900 default
+  logoUrl    String?
+  welcomeMessage String?
+
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
   users     User[]
   featureFlags FeatureFlag[]
+  attendance Attendance[]
 }
 
 // ------------------------------------------------------
@@ -45,13 +52,32 @@ model User {
   phone_number String?
   role         UserRole @default(MEMBER)
   
+  // Membership Tracking
+  membershipTier     String?  @default("BASIC") // BASIC, PREMIUM, VIP
+  subscriptionStatus String?  @default("ACTIVE") // ACTIVE, EXPIRED, FROZEN
+
   // Link to the Tenant
   tenantId     String? // Optional because PLATFORM_ADMIN doesn't belong to a specific gym!
   tenant       Tenant?  @relation(fields: [tenantId], references: [id])
 
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  attendance Attendance[]
+}
+
+// ------------------------------------------------------
+// 2.5 ATTENDANCE TRACKING
+// ------------------------------------------------------
+model Attendance {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  checkInTime DateTime @default(now())
 }
 
 // ------------------------------------------------------
