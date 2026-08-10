@@ -21,6 +21,12 @@ enum UserRole {
   MEMBER
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELED
+}
+
 // ------------------------------------------------------
 // 1. TENANT (THE GYM ORGANIZATION)
 // ------------------------------------------------------
@@ -39,6 +45,8 @@ model Tenant {
   users     User[]
   featureFlags FeatureFlag[]
   attendance Attendance[]
+  classes   Class[]
+  plans     MembershipPlan[]
 }
 
 // ------------------------------------------------------
@@ -52,10 +60,6 @@ model User {
   phone_number String?
   role         UserRole @default(MEMBER)
   
-  // Membership Tracking
-  membershipTier     String?  @default("BASIC") // BASIC, PREMIUM, VIP
-  subscriptionStatus String?  @default("ACTIVE") // ACTIVE, EXPIRED, FROZEN
-
   // Link to the Tenant
   tenantId     String? // Optional because PLATFORM_ADMIN doesn't belong to a specific gym!
   tenant       Tenant?  @relation(fields: [tenantId], references: [id])
@@ -63,6 +67,8 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   attendance Attendance[]
+  classBookings ClassBooking[]
+  subscriptions Subscription[]
 }
 
 // ------------------------------------------------------
@@ -97,4 +103,76 @@ model FeatureFlag {
   updatedAt   DateTime @updatedAt
 
   @@unique([key, tenantId]) // A gym can only have one flag per key
+}
+
+// ------------------------------------------------------
+// 4. CLASSES & SCHEDULING
+// ------------------------------------------------------
+model Class {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  instructor  String
+  capacity    Int
+  startTime   DateTime
+  duration    Int      // duration in minutes
+  
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  bookings    ClassBooking[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ClassBooking {
+  id        String   @id @default(uuid())
+  
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bookedAt  DateTime @default(now())
+  
+  @@unique([classId, userId]) // Prevent double-booking
+}
+
+// ------------------------------------------------------
+// 5. MEMBERSHIP PLANS & SUBSCRIPTIONS
+// ------------------------------------------------------
+model MembershipPlan {
+  id             String   @id @default(uuid())
+  name           String
+  durationMonths Int
+  price          Float
+  access         String?  // E.g. 'Gym floor', 'Gym + classes', 'Full access'
+  benefits       String[]
+  
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  subscriptions  Subscription[]
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Subscription {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  planId    String
+  plan      MembershipPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  startDate DateTime @default(now())
+  endDate   DateTime
+  status    SubscriptionStatus @default(ACTIVE)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

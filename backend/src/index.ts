@@ -189,6 +189,13 @@ app.get('/api/tenant/:id/dashboard', async (req, res) => {
 
     const members = await prisma.user.findMany({
       where: { tenantId: gymId, role: 'MEMBER' },
+      include: {
+        subscriptions: {
+          include: { plan: true },
+          orderBy: { endDate: 'desc' },
+          take: 1
+        }
+      },
       orderBy: { createdAt: 'desc' }
     });
 
@@ -224,9 +231,14 @@ app.post('/api/users', async (req, res) => {
 app.post('/api/tenant/:id/members', async (req, res) => {
   try {
     const gymId = req.params.id;
-    const { name, email, phone_number, membershipTier } = req.body;
-    // Basic auth check (should verify adminEmail in real app, but for speed we trust the dashboard call)
+    const { name, email, phone_number, planId } = req.body;
     
+    // Find the plan to calculate endDate
+    let plan = null;
+    if (planId) {
+      plan = await prisma.membershipPlan.findUnique({ where: { id: planId } });
+    }
+
     const newUser = await prisma.user.create({
       data: {
         name,
@@ -234,8 +246,13 @@ app.post('/api/tenant/:id/members', async (req, res) => {
         phone_number,
         tenantId: gymId,
         role: 'MEMBER',
-        membershipTier: membershipTier || 'BASIC',
-        subscriptionStatus: 'ACTIVE'
+        subscriptions: plan ? {
+          create: {
+            planId: plan.id,
+            endDate: new Date(new Date().setMonth(new Date().getMonth() + plan.durationMonths)),
+            status: 'ACTIVE'
+          }
+        } : undefined
       }
     });
     res.status(201).json(newUser);
@@ -297,13 +314,23 @@ app.put('/api/tenant/:id/settings', async (req, res) => {
 app.put('/api/users/:userId/membership', async (req, res) => {
   try {
     const { userId } = req.params;
-    const { membershipTier, subscriptionStatus } = req.body;
+    const { planId, status } = req.body;
     
-    const updated = await prisma.user.update({
-      where: { id: userId },
-      data: { membershipTier, subscriptionStatus }
+    // In a real app we'd update the specific subscription, or create a new one.
+    // For this prototype, we'll just update the user's latest subscription.
+    const latestSub = await prisma.subscription.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' }
     });
-    res.json(updated);
+
+    if (latestSub && status) {
+      await prisma.subscription.update({
+        where: { id: latestSub.id },
+        data: { status }
+      });
+    }
+
+    res.json({ message: 'Updated successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to update membership' });
   }
@@ -316,9 +343,31 @@ app.post('/api/users/:userId/checkin', async (req, res) => {
   try {
     const { userId } = req.params;
     // Find the user to get their tenantId
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({ 
+      where: { id: userId },
+      include: {
+        subscriptions: {
+          where: { status: 'ACTIVE' },
+          orderBy: { endDate: 'desc' },
+          take: 1
+        }
+      }
+    });
     if (!user || !user.tenantId) return res.status(404).json({ error: 'User not found' });
-    if (user.subscriptionStatus !== 'ACTIVE') return res.status(403).json({ error: 'Subscription is not active' });
+    if (user.subscriptions.length === 0) return res.status(403).json({ error: 'Subscription is not active' });
+
+    // 10 minute cooldown check
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const recentCheckin = await prisma.attendance.findFirst({
+      where: { 
+        userId: user.id,
+        checkInTime: { gte: tenMinutesAgo }
+      }
+    });
+
+    if (recentCheckin) {
+      return res.status(429).json({ error: 'Member already checked in within the last 10 minutes!' });
+    }
 
     const attendance = await prisma.attendance.create({
       data: {
@@ -339,19 +388,10 @@ app.get('/api/tenant/:id/analytics', async (req, res) => {
   try {
     const gymId = req.params.id;
     
-    // Group members by tier
-    const tierDistribution = await prisma.user.groupBy({
-      by: ['membershipTier'],
-      where: { tenantId: gymId, role: 'MEMBER' },
-      _count: { id: true }
-    });
-
-    // Group members by status
-    const statusDistribution = await prisma.user.groupBy({
-      by: ['subscriptionStatus'],
-      where: { tenantId: gymId, role: 'MEMBER' },
-      _count: { id: true }
-    });
+    // Since we removed membershipTier/subscriptionStatus fields from User, we'll
+    // skip the simple groupings for now and just focus on Subscriptions.
+    const tierDistribution: any[] = [];
+    const statusDistribution: any[] = [];
 
     // Get last 30 attendance records
     const recentAttendance = await prisma.attendance.findMany({
@@ -361,9 +401,187 @@ app.get('/api/tenant/:id/analytics', async (req, res) => {
       include: { user: { select: { name: true } } }
     });
 
-    res.json({ tierDistribution, statusDistribution, recentAttendance });
+    // Calculate MRR based on active subscriptions
+    const activeSubs = await prisma.subscription.findMany({
+      where: { 
+        status: 'ACTIVE',
+        user: { tenantId: gymId }
+      },
+      include: { plan: true }
+    });
+
+    let mrr = 0;
+    activeSubs.forEach(sub => {
+      // Normalize price to monthly: (Price / DurationMonths)
+      const monthlyContribution = sub.plan.price / sub.plan.durationMonths;
+      mrr += monthlyContribution;
+    });
+
+    res.json({ tierDistribution, statusDistribution, recentAttendance, mrr });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
+
+// ------------------------------------------------------
+// 12. MEMBERSHIP PLANS
+// ------------------------------------------------------
+app.get('/api/tenant/:gymId/plans', async (req, res) => {
+  try {
+    const plans = await prisma.membershipPlan.findMany({
+      where: { tenantId: req.params.gymId },
+      orderBy: { price: 'asc' }
+    });
+    res.json(plans);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch plans' });
+  }
+});
+
+app.post('/api/tenant/:gymId/plans', async (req, res) => {
+  try {
+    const { name, durationMonths, price, access, benefits } = req.body;
+    const plan = await prisma.membershipPlan.create({
+      data: {
+        name,
+        durationMonths: parseInt(durationMonths),
+        price: parseFloat(price),
+        access,
+        benefits,
+        tenantId: req.params.gymId
+      }
+    });
+    res.status(201).json(plan);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create plan' });
+  }
+});
+
+// ------------------------------------------------------
+// 13. GYM ADMIN: CREATE CLASS
+// ------------------------------------------------------
+app.post('/api/tenant/:gymId/classes', async (req, res) => {
+  try {
+    const { name, description, instructor, capacity, startTime, duration } = req.body;
+    const gymId = req.params.gymId;
+
+    const newClass = await prisma.class.create({
+      data: {
+        name,
+        description,
+        instructor,
+        capacity: parseInt(capacity),
+        startTime: new Date(startTime),
+        duration: parseInt(duration),
+        tenantId: gymId
+      }
+    });
+    res.status(201).json(newClass);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create class' });
+  }
+});
+
+// ------------------------------------------------------
+// 13. TENANT / MEMBER: GET CLASSES
+// ------------------------------------------------------
+app.get('/api/tenant/:gymId/classes', async (req, res) => {
+  try {
+    const gymId = req.params.gymId;
+    const classes = await prisma.class.findMany({
+      where: { tenantId: gymId },
+      orderBy: { startTime: 'asc' },
+      include: {
+        bookings: { select: { userId: true } }
+      }
+    });
+    // Add computed booking count
+    const classesWithCount = classes.map(c => ({
+      ...c,
+      bookedCount: c.bookings.length
+    }));
+    res.json(classesWithCount);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch classes' });
+  }
+});
+
+// ------------------------------------------------------
+// 14. MEMBER: BOOK CLASS
+// ------------------------------------------------------
+app.post('/api/member/classes/:classId/book', async (req, res) => {
+  try {
+    const classId = req.params.classId;
+    const { userId } = req.body;
+    
+    // Check capacity
+    const classInfo = await prisma.class.findUnique({
+      where: { id: classId },
+      include: { _count: { select: { bookings: true } } }
+    });
+    
+    if (!classInfo) return res.status(404).json({ error: 'Class not found' });
+    if (classInfo._count.bookings >= classInfo.capacity) {
+      return res.status(400).json({ error: 'Class is fully booked!' });
+    }
+
+    const booking = await prisma.classBooking.create({
+      data: { classId, userId }
+    });
+    res.json(booking);
+  } catch (error: any) {
+    if (error.code === 'P2002') return res.status(400).json({ error: 'You are already booked for this class!' });
+    res.status(500).json({ error: 'Failed to book class' });
+  }
+});
+
+// ------------------------------------------------------
+// 15. MEMBER PORTAL: LOGIN & FETCH DATA
+// ------------------------------------------------------
+app.post('/api/member/login', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: {
+        tenant: true, // Get their gym's branding
+        subscriptions: {
+          include: { plan: true },
+          orderBy: { endDate: 'desc' },
+          take: 1
+        }
+      }
+    });
+
+    if (!user || user.role !== 'MEMBER') {
+      return res.status(404).json({ error: 'Member not found with this email' });
+    }
+
+    if (!user.tenant || user.tenant.status !== 'APPROVED') {
+      return res.status(403).json({ error: 'Gym is not fully active yet.' });
+    }
+
+    // Only return safe data to the client
+    const { password, ...safeUser } = user;
+    res.json(safeUser);
+  } catch (error) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.get('/api/member/:id/attendance', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const history = await prisma.attendance.findMany({
+      where: { userId: id },
+      orderBy: { checkInTime: 'desc' },
+      take: 50 // Limit to last 50 for performance
+    });
+    res.json(history);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch attendance history' });
   }
 });
 

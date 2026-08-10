@@ -1,21 +1,24 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Users, Settings, Activity, UserPlus, CheckCircle, ClipboardCheck, Eye, Edit, Trash2 } from "lucide-react";
+import { Users, Settings, Activity, UserPlus, CheckCircle, ClipboardCheck, Eye, Edit, Trash2, TrendingUp, Calendar, Clock, Users as UsersIcon } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis } from 'recharts';
 
 export default function TenantDashboard() {
   const [gyms, setGyms] = useState<any[]>([]);
   const [selectedGymId, setSelectedGymId] = useState<string>("");
   const [adminEmail, setAdminEmail] = useState<string>("");
+  const [isVerified, setIsVerified] = useState(false);
   
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [editingMember, setEditingMember] = useState<any>(null);
+  const [classes, setClasses] = useState<any[]>([]);
+  const [plans, setPlans] = useState<any[]>([]);
 
-  const [activeTab, setActiveTab] = useState<"overview" | "members" | "settings" | "attendance">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "members" | "settings" | "attendance" | "classes" | "plans">("overview");
 
   // Session persistence on mount
   useEffect(() => {
@@ -26,6 +29,8 @@ export default function TenantDashboard() {
       setSelectedGymId(savedGymId);
       fetchDashboard(savedGymId, savedEmail);
       fetchAnalytics(savedGymId);
+      fetchClasses(savedGymId);
+      fetchPlans(savedGymId);
     }
   }, []);
 
@@ -66,6 +71,26 @@ export default function TenantDashboard() {
     }
   };
 
+  const fetchClasses = async (gymId: string) => {
+    try {
+      const res = await fetch(`http://localhost:3001/api/tenant/${gymId}/classes`);
+      const data = await res.json();
+      setClasses(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchPlans = async (gymId: string) => {
+    try {
+      const res = await fetch(`http://localhost:3001/api/tenant/${gymId}/plans`);
+      const data = await res.json();
+      setPlans(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGymId || !adminEmail) return;
@@ -90,8 +115,10 @@ export default function TenantDashboard() {
       localStorage.setItem("tenant_adminEmail", adminEmail);
       localStorage.setItem("tenant_gymId", selectedGymId);
 
-      // Fetch analytics
+      // Fetch analytics parallel
       fetchAnalytics(selectedGymId);
+      fetchClasses(selectedGymId);
+      fetchPlans(selectedGymId);
     } catch (err: any) {
       setError(err.message || "Network error");
     } finally {
@@ -116,7 +143,7 @@ export default function TenantDashboard() {
           name: fd.get("name"),
           email: fd.get("email"),
           phone_number: fd.get("phone"),
-          membershipTier: fd.get("tier")
+          planId: fd.get("planId")
         })
       });
       
@@ -137,7 +164,10 @@ export default function TenantDashboard() {
   };
 
   const handleViewMember = (member: any) => {
-    alert(`Member Details:\n\nName: ${member.name}\nEmail: ${member.email}\nPhone: ${member.phone_number || 'N/A'}\nTier: ${member.membershipTier}\nStatus: ${member.subscriptionStatus}\nJoined: ${new Date(member.createdAt).toLocaleDateString()}`);
+    const sub = member.subscriptions?.[0];
+    const tier = sub?.plan?.name || 'N/A';
+    const status = sub?.status || 'N/A';
+    alert(`Member Details:\n\nName: ${member.name}\nEmail: ${member.email}\nPhone: ${member.phone_number || 'N/A'}\nPlan: ${tier}\nStatus: ${status}\nJoined: ${new Date(member.createdAt).toLocaleDateString()}`);
   };
 
   const handleDeleteMember = async (id: string) => {
@@ -154,8 +184,39 @@ export default function TenantDashboard() {
   const handleCheckIn = async (userId: string) => {
     try {
       const res = await fetch(`http://localhost:3001/api/users/${userId}/checkin`, { method: "POST" });
-      if (!res.ok) alert("Cannot check in: Subscription may be expired.");
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "Cannot check in: Subscription may be expired.");
+        return;
+      }
       fetchAnalytics(dashboardData.gym.id);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleAddClass = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    try {
+      const res = await fetch(`http://localhost:3001/api/tenant/${dashboardData.gym.id}/classes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: fd.get("name"),
+          description: fd.get("description"),
+          instructor: fd.get("instructor"),
+          capacity: fd.get("capacity"),
+          startTime: fd.get("startTime"),
+          duration: fd.get("duration")
+        })
+      });
+      if (res.ok) {
+        (e.target as HTMLFormElement).reset();
+        fetchClasses(dashboardData.gym.id);
+      } else {
+        alert("Failed to schedule class");
+      }
     } catch (err) {
       console.error(err);
     }
@@ -166,9 +227,39 @@ export default function TenantDashboard() {
       await fetch(`http://localhost:3001/api/users/${userId}/membership`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscriptionStatus: status })
+        body: JSON.stringify({ status })
       });
       fetchDashboard(dashboardData.gym.id, adminEmail);
+      fetchAnalytics(dashboardData.gym.id);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCreatePlan = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const benefitsString = fd.get("benefits") as string;
+    const benefits = benefitsString.split(',').map(s => s.trim()).filter(Boolean);
+    
+    try {
+      const res = await fetch(`http://localhost:3001/api/tenant/${dashboardData.gym.id}/plans`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: fd.get("name"),
+          durationMonths: fd.get("durationMonths"),
+          price: fd.get("price"),
+          access: fd.get("access"),
+          benefits
+        })
+      });
+      if (res.ok) {
+        (e.target as HTMLFormElement).reset();
+        fetchPlans(dashboardData.gym.id);
+      } else {
+        alert("Failed to create plan");
+      }
     } catch (err) {
       console.error(err);
     }
@@ -235,8 +326,9 @@ export default function TenantDashboard() {
   const getFlag = (key: string) => gym.featureFlags?.find((f: any) => f.key === key)?.isEnabled || false;
   const isExportEnabled = getFlag('export-data');
   const isAnalyticsEnabled = getFlag('advanced-analytics');
-  const isMemberMgmtEnabled = getFlag('member-management');
-  const isAttendanceEnabled = getFlag('attendance-tracking');
+  const isMemberMgmtEnabled = getFlag("member-management");
+  const isAttendanceEnabled = getFlag("attendance-tracking");
+  const isClassesEnabled = getFlag("classes-scheduling");
   const isSettingsEnabled = getFlag('white-labeling');
 
   const COLORS = [brandColor, '#94a3b8', '#cbd5e1'];
@@ -270,6 +362,22 @@ export default function TenantDashboard() {
               style={activeTab === "members" ? { backgroundColor: brandColor } : {}}
             >
               <Users className="w-4 h-4" /> Member Management
+            </button>
+          )}
+          <button
+            onClick={() => setActiveTab("plans")}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${activeTab === "plans" ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            style={activeTab === "plans" ? { backgroundColor: brandColor } : {}}
+          >
+            <Settings className="w-4 h-4" /> Membership Plans
+          </button>
+          {isClassesEnabled && (
+            <button 
+              onClick={() => setActiveTab("classes")}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${activeTab === "classes" ? "text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              style={activeTab === "classes" ? { backgroundColor: brandColor } : {}}
+            >
+              <Calendar className="w-5 h-5" /> Schedule Classes
             </button>
           )}
           {isAttendanceEnabled && (
@@ -332,60 +440,23 @@ export default function TenantDashboard() {
 
           {/* TAB: OVERVIEW */}
           {activeTab === "overview" && isAnalyticsEnabled && analyticsData && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               
-              <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
-                <h3 className="text-sm font-bold text-slate-800 mb-6 flex items-center gap-2">
-                  <PieChart className="w-4 h-4" /> Membership Tiers
-                </h3>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={analyticsData.tierDistribution} dataKey="_count.id" nameKey="membershipTier" cx="50%" cy="50%" innerRadius={60} outerRadius={80} label>
-                        {analyticsData.tierDistribution.map((entry: any, index: number) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm">
-                <h3 className="text-sm font-bold text-slate-800 mb-6 flex items-center gap-2">
-                  <Activity className="w-4 h-4" /> Subscription Health
-                </h3>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analyticsData.statusDistribution}>
-                      <XAxis dataKey="subscriptionStatus" />
-                      <YAxis allowDecimals={false} />
-                      <Tooltip />
-                      <Bar dataKey="_count.id" fill={brandColor} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm md:col-span-2">
-                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <CheckCircle className="w-4 h-4" /> Recent Check-ins
-                </h3>
-                {analyticsData.recentAttendance.length === 0 ? (
-                  <p className="text-sm text-slate-500">No check-ins yet.</p>
-                ) : (
-                  <div className="flex gap-2 flex-wrap">
-                    {analyticsData.recentAttendance.map((a: any) => (
-                      <div key={a.id} className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-xs font-medium text-slate-700 flex flex-col">
-                        <span>{a.user.name}</span>
-                        <span className="text-[10px] text-slate-400">{new Date(a.checkInTime).toLocaleTimeString()}</span>
-                      </div>
-                    ))}
+              {/* MRR Card */}
+              <div className="bg-white border border-slate-200 p-6 rounded-xl shadow-sm lg:col-span-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2 mb-1">
+                    <TrendingUp className="w-4 h-4" /> Monthly Recurring Revenue
+                  </h3>
+                  <div className="text-4xl font-black text-slate-800">
+                    ${analyticsData.mrr?.toLocaleString() || 0}
                   </div>
-                )}
+                  <p className="text-sm font-medium text-emerald-600 mt-1">Est. Annual: ${(analyticsData.mrr * 12)?.toLocaleString() || 0}</p>
+                </div>
+                <div className="hidden sm:block opacity-10">
+                  <TrendingUp className="w-24 h-24" />
+                </div>
               </div>
-
             </div>
           )}
 
@@ -412,22 +483,22 @@ export default function TenantDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <span className="px-2 py-1 bg-slate-100 text-slate-700 text-[10px] font-bold rounded">
-                            {member.membershipTier}
+                            {member.subscriptions?.[0]?.plan?.name || "No Plan"}
                           </span>
                         </td>
                         <td className="px-4 py-3">
                           <select 
-                            value={member.subscriptionStatus}
+                            value={member.subscriptions?.[0]?.status || "CANCELED"}
                             onChange={(e) => handleUpdateStatus(member.id, e.target.value)}
                             className={`text-xs font-bold rounded-full px-2 py-1 outline-none border ${
-                              member.subscriptionStatus === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
-                              member.subscriptionStatus === 'EXPIRED' ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                              member.subscriptions?.[0]?.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
+                              member.subscriptions?.[0]?.status === 'EXPIRED' ? 'bg-rose-50 text-rose-700 border-rose-200' :
                               'bg-amber-50 text-amber-700 border-amber-200'
                             }`}
                           >
                             <option value="ACTIVE">ACTIVE</option>
                             <option value="EXPIRED">EXPIRED</option>
-                            <option value="FROZEN">FROZEN</option>
+                            <option value="CANCELED">CANCELED</option>
                           </select>
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -435,7 +506,12 @@ export default function TenantDashboard() {
                             <button onClick={() => handleViewMember(member)} className="text-slate-400 hover:text-blue-600 transition-colors" title="View">
                               <Eye className="w-4 h-4" />
                             </button>
-                            <button onClick={() => setEditingMember(member)} className="text-slate-400 hover:text-amber-600 transition-colors" title="Edit">
+                            <button onClick={() => {
+                              setEditingMember(member);
+                              setTimeout(() => {
+                                document.getElementById('member-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }, 100);
+                            }} className="text-slate-400 hover:text-amber-600 transition-colors" title="Edit">
                               <Edit className="w-4 h-4" />
                             </button>
                             <button onClick={() => handleDeleteMember(member.id)} className="text-slate-400 hover:text-red-600 transition-colors" title="Delete">
@@ -449,7 +525,7 @@ export default function TenantDashboard() {
                 </table>
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm h-fit">
+              <div id="member-form" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm h-fit">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                     <UserPlus className="w-4 h-4" /> {editingMember ? "Edit Member" : "Add New Member"}
@@ -462,10 +538,11 @@ export default function TenantDashboard() {
                   <input key={`name-${editingMember?.id}`} name="name" defaultValue={editingMember?.name} required placeholder="Full Name" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
                   <input key={`email-${editingMember?.id}`} name="email" type="email" defaultValue={editingMember?.email} required placeholder="Email Address" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
                   <input key={`phone-${editingMember?.id}`} name="phone" defaultValue={editingMember?.phone_number} placeholder="Phone (Optional)" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
-                  <select key={`tier-${editingMember?.id}`} name="tier" defaultValue={editingMember?.membershipTier || "BASIC"} className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md text-slate-700 font-medium">
-                    <option value="BASIC">Basic Plan</option>
-                    <option value="PREMIUM">Premium Plan</option>
-                    <option value="VIP">VIP Plan</option>
+                  <select name="planId" defaultValue={editingMember?.subscriptions?.[0]?.planId || ""} required className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md text-slate-700 font-medium">
+                    <option value="">Select Plan</option>
+                    {plans.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} - ${p.price}</option>
+                    ))}
                   </select>
                   <button type="submit" className="w-full py-2 mt-2 text-white text-sm font-semibold rounded-md shadow-sm" style={{ backgroundColor: brandColor }}>
                     {editingMember ? "Update Member" : "Register Member"}
@@ -473,6 +550,73 @@ export default function TenantDashboard() {
                 </form>
               </div>
 
+            </div>
+          )}
+
+          {/* TAB: CLASSES */}
+          {activeTab === "classes" && isClassesEnabled && (
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+              <div className="xl:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Class Name</th>
+                      <th className="px-4 py-3 font-semibold">Instructor</th>
+                      <th className="px-4 py-3 font-semibold">Date & Time</th>
+                      <th className="px-4 py-3 font-semibold text-right">Bookings</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {classes.map(c => {
+                      const dt = new Date(c.startTime);
+                      const isFull = c.bookedCount >= c.capacity;
+                      return (
+                        <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-3">
+                            <p className="font-bold text-slate-900">{c.name}</p>
+                            <p className="text-xs text-slate-500">{c.duration} mins</p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{c.instructor}</td>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-slate-800">{dt.toLocaleDateString()}</p>
+                            <p className="text-xs text-slate-500">{dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={`inline-flex items-center gap-1 font-bold ${isFull ? 'text-rose-600' : 'text-emerald-600'}`}>
+                              {c.bookedCount} / {c.capacity}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {classes.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="p-8 text-center text-slate-500">No upcoming classes scheduled.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm h-fit">
+                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <Calendar className="w-4 h-4" /> Schedule New Class
+                </h3>
+                <form onSubmit={handleAddClass} className="flex flex-col gap-3">
+                  <input name="name" required placeholder="Class Name (e.g. Yoga)" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
+                  <input name="instructor" required placeholder="Instructor Name" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
+                  <textarea name="description" placeholder="Description (Optional)" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md resize-none" rows={2}></textarea>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input name="capacity" type="number" min="1" required placeholder="Capacity" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
+                    <input name="duration" type="number" min="1" required placeholder="Mins (e.g. 60)" className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md" />
+                  </div>
+                  <input name="startTime" type="datetime-local" required className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md text-slate-600" />
+                  
+                  <button type="submit" className="w-full py-2 mt-2 text-white text-sm font-semibold rounded-md shadow-sm" style={{ backgroundColor: brandColor }}>
+                    Publish Class
+                  </button>
+                </form>
+              </div>
             </div>
           )}
 
@@ -547,6 +691,46 @@ export default function TenantDashboard() {
                   Save Changes
                 </button>
               </form>
+            </div>
+          )}
+
+          {/* TAB: PLANS */}
+          {activeTab === "plans" && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm p-6">
+                <h3 className="text-lg font-bold text-slate-800 mb-4">Active Plans</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {plans.map(plan => (
+                    <div key={plan.id} className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+                      <div className="flex justify-between items-start mb-2">
+                        <h4 className="font-bold text-slate-900">{plan.name}</h4>
+                        <span className="text-lg font-black text-slate-800">${plan.price}</span>
+                      </div>
+                      <p className="text-sm font-medium text-slate-600 mb-1">{plan.durationMonths} Months Duration</p>
+                      <p className="text-sm font-bold text-blue-600 mb-3 bg-blue-50 px-2 py-1 rounded inline-block">{plan.access}</p>
+                      <ul className="text-xs text-slate-500 space-y-1">
+                        {plan.benefits.map((b: string, i: number) => (
+                          <li key={i} className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-emerald-500"/> {b}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  {plans.length === 0 && <p className="text-sm text-slate-500">No plans created yet.</p>}
+                </div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm h-fit">
+                <h3 className="text-sm font-bold text-slate-800 mb-4">Create New Plan</h3>
+                <form onSubmit={handleCreatePlan} className="flex flex-col gap-3">
+                  <input name="name" required placeholder="Plan Name (e.g. Basic Annual)" className="w-full px-3 py-2 text-sm border rounded-md" />
+                  <input name="durationMonths" type="number" required placeholder="Duration in Months (e.g. 12)" className="w-full px-3 py-2 text-sm border rounded-md" />
+                  <input name="price" type="number" step="0.01" required placeholder="Total Price ($)" className="w-full px-3 py-2 text-sm border rounded-md" />
+                  <input name="access" required placeholder="Access Level (e.g. Gym floor, Full access)" className="w-full px-3 py-2 text-sm border rounded-md" />
+                  <textarea name="benefits" required placeholder="Benefits (comma separated, e.g. 24/7 Access, Free Towel)" className="w-full px-3 py-2 text-sm border rounded-md h-24 resize-none" />
+                  <button type="submit" className="w-full py-2 mt-2 text-white text-sm font-semibold rounded-md" style={{ backgroundColor: brandColor }}>
+                    Create Plan
+                  </button>
+                </form>
+              </div>
             </div>
           )}
 

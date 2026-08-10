@@ -204,7 +204,8 @@ export default function PlatformAdmin() {
                       { key: 'advanced-analytics', label: 'Analytics Tab' },
                       { key: 'member-management', label: 'Members Tab' },
                       { key: 'attendance-tracking', label: 'Attendance Tab' },
-                      { key: 'white-labeling', label: 'Settings Tab' }
+                      { key: 'white-labeling', label: 'Settings Tab' },
+                      { key: 'classes-scheduling', label: 'Classes Tab' }
                     ];
 
                     return (
