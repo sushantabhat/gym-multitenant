@@ -272,7 +272,10 @@ export default function TenantDashboard() {
       await fetch(`http://localhost:3001/api/tenant/${dashboardData.gym.id}/settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brandColor: fd.get("brandColor") })
+        body: JSON.stringify({ 
+          brandColor: fd.get("brandColor"),
+          welcomeMessage: fd.get("welcomeMessage")
+        })
       });
       fetchDashboard(dashboardData.gym.id, adminEmail);
       alert("Settings saved!");
@@ -676,21 +679,43 @@ export default function TenantDashboard() {
 
           {/* TAB: SETTINGS */}
           {activeTab === "settings" && isSettingsEnabled && (
-            <div className="max-w-lg bg-white border border-slate-200 rounded-xl p-8 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800 mb-6">White-Label Customization</h3>
-              <form onSubmit={handleUpdateSettings} className="space-y-5">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Primary Brand Color</label>
-                  <div className="flex items-center gap-3">
-                    <input name="brandColor" type="color" defaultValue={brandColor} className="w-12 h-12 rounded cursor-pointer" />
-                    <span className="text-sm text-slate-500 font-mono uppercase">{brandColor}</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm">
+                <h3 className="text-sm font-bold text-slate-800 mb-6">White-Label Customization</h3>
+                <form onSubmit={handleUpdateSettings} className="space-y-5">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Primary Brand Color</label>
+                    <div className="flex items-center gap-3">
+                      <input name="brandColor" type="color" defaultValue={brandColor} className="w-12 h-12 rounded cursor-pointer" />
+                      <span className="text-sm text-slate-500 font-mono uppercase">{brandColor}</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-2">This color will be dynamically applied to your dashboard sidebar, charts, and buttons.</p>
                   </div>
-                  <p className="text-xs text-slate-500 mt-2">This color will be dynamically applied to your dashboard sidebar, charts, and buttons.</p>
-                </div>
-                <button type="submit" className="px-6 py-2 bg-slate-900 text-white text-sm font-medium rounded-md shadow-sm">
-                  Save Changes
-                </button>
-              </form>
+                  <input type="hidden" name="welcomeMessage" value={dashboardData.gym.welcomeMessage || ""} />
+                  <button type="submit" className="px-6 py-2 bg-slate-900 text-white text-sm font-medium rounded-md shadow-sm">
+                    Save Changes
+                  </button>
+                </form>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm">
+                <h3 className="text-sm font-bold text-slate-800 mb-6">Member Portal Notice Board</h3>
+                <form onSubmit={handleUpdateSettings} className="space-y-5">
+                  <input type="hidden" name="brandColor" value={brandColor} />
+                  <div>
+                    <textarea 
+                      name="welcomeMessage" 
+                      defaultValue={dashboardData.gym.welcomeMessage || ""} 
+                      placeholder="E.g., Welcome back to Iron Gym! Don't forget your water bottle."
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md h-24 resize-none"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">This message will be displayed on the notice board in the member portal.</p>
+                  </div>
+                  <button type="submit" className="px-6 py-2 bg-slate-900 text-white text-sm font-medium rounded-md shadow-sm">
+                    Update Notice Board
+                  </button>
+                </form>
+              </div>
             </div>
           )}
 

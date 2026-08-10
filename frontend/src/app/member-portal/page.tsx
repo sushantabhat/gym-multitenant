@@ -205,8 +205,11 @@ export default function MemberPortal() {
 
               {activeSub && (
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Expires On</p>
-                  <p className="text-slate-700 font-medium">{new Date(activeSub.endDate).toLocaleDateString()}</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Time Remaining</p>
+                  <div className="flex items-baseline gap-2">
+                    <p className="text-slate-700 font-bold">{Math.max(0, Math.ceil((new Date(activeSub.endDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)))} Days Left</p>
+                    <p className="text-xs text-slate-400">(Expires {new Date(activeSub.endDate).toLocaleDateString()})</p>
+                  </div>
                 </div>
               )}
 
